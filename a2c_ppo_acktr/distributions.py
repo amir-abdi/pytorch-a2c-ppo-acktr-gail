@@ -3,6 +3,7 @@ import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import wandb
 
 from a2c_ppo_acktr.utils import AddBias, init
 
@@ -21,10 +22,11 @@ old_sample = FixedCategorical.sample
 FixedCategorical.sample = lambda self: old_sample(self).unsqueeze(-1)
 
 log_prob_cat = FixedCategorical.log_prob
-FixedCategorical.log_probs = lambda self, actions: log_prob_cat(self, actions.squeeze(-1)).view(actions.size(0), -1).sum(-1).unsqueeze(-1)
+FixedCategorical.log_probs = lambda self, actions: log_prob_cat(self, actions.squeeze(-1)).view(actions.size(0),
+                                                                                                -1).sum(-1).unsqueeze(
+    -1)
 
 FixedCategorical.mode = lambda self: self.probs.argmax(dim=-1, keepdim=True)
-
 
 # Normal
 FixedNormal = torch.distributions.Normal
@@ -37,12 +39,12 @@ FixedNormal.entropy = lambda self: normal_entropy(self).sum(-1)
 
 FixedNormal.mode = lambda self: self.mean
 
-
 # Bernoulli
 FixedBernoulli = torch.distributions.Bernoulli
 
 log_prob_bernoulli = FixedBernoulli.log_prob
-FixedBernoulli.log_probs = lambda self, actions: log_prob_bernoulli(self, actions).view(actions.size(0), -1).sum(-1).unsqueeze(-1)
+FixedBernoulli.log_probs = lambda self, actions: log_prob_bernoulli(self, actions).view(actions.size(0), -1).sum(
+    -1).unsqueeze(-1)
 
 bernoulli_entropy = FixedBernoulli.entropy
 FixedBernoulli.entropy = lambda self: bernoulli_entropy(self).sum(-1)
@@ -54,9 +56,9 @@ class Categorical(nn.Module):
         super(Categorical, self).__init__()
 
         init_ = lambda m: init(m,
-            nn.init.orthogonal_,
-            lambda x: nn.init.constant_(x, 0),
-            gain=0.01)
+                               nn.init.orthogonal_,
+                               lambda x: nn.init.constant_(x, 0),
+                               gain=0.01)
 
         self.linear = init_(nn.Linear(num_inputs, num_outputs))
 
@@ -70,11 +72,13 @@ class DiagGaussian(nn.Module):
         super(DiagGaussian, self).__init__()
 
         init_ = lambda m: init(m,
-            nn.init.orthogonal_,
-            lambda x: nn.init.constant_(x, 0))
+                               nn.init.orthogonal_,
+                               lambda x: nn.init.constant_(x, 0))
 
         self.fc_mean = init_(nn.Linear(num_inputs, num_outputs))
-        self.logstd = AddBias(torch.zeros(num_outputs))
+        self.logstd = AddBias(torch.ones(num_outputs) * (-1.5))  # torch.zeros(num_outputs))
+
+    log_count = 0
 
     def forward(self, x):
         action_mean = self.fc_mean(x)
@@ -85,7 +89,19 @@ class DiagGaussian(nn.Module):
             zeros = zeros.cuda()
 
         action_logstd = self.logstd(zeros)
-        return FixedNormal(action_mean, action_logstd.exp())
+        # print('****action_logstd', action_logstd)
+        # print('****action_logstd.exp()', action_logstd.exp())
+        std = action_logstd.exp()
+
+        std_mean = std.mean().detach().cpu()
+        # if self.log_count % 100 == 0:
+        #     print('****std_mean', std_mean)
+            # wandb.log({'average std': std_mean})
+
+        self.log_count += 1
+
+        # entropy of gaussian = 0.5ln(2𝜋e𝜎2) = 0.5 + 0.5ln(2𝜋) + ln(𝜎)
+        return FixedNormal(action_mean, std)
 
 
 class Bernoulli(nn.Module):
@@ -93,8 +109,8 @@ class Bernoulli(nn.Module):
         super(Bernoulli, self).__init__()
 
         init_ = lambda m: init(m,
-            nn.init.orthogonal_,
-            lambda x: nn.init.constant_(x, 0))
+                               nn.init.orthogonal_,
+                               lambda x: nn.init.constant_(x, 0))
 
         self.linear = init_(nn.Linear(num_inputs, num_outputs))
 

@@ -62,6 +62,8 @@ def load_data(indir, smooth, bin_size):
             for line in f:
                 tmp = line.split(',')
                 t_time = float(tmp[2])
+                print('0*****{}****'.format(tmp[0]))
+                print('1*****{}****'.format(tmp[1]))
                 tmp = [t_time, int(tmp[1]), float(tmp[0])]
                 datas.append(tmp)
 
